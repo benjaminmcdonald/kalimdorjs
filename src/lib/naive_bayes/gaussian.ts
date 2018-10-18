@@ -4,6 +4,21 @@ import math from '../utils/MathExtra';
 
 const { isMatrix } = math.contrib;
 
+type TypeMatrix<T> = ReadonlyArray<ReadonlyArray<T>>
+interface StrNumDict<T> {
+  [key: string]: T;
+  [key: number]: T;
+}
+type StrNumDictArray = StrNumDict<Array<ReadonlyArray<number>>>;
+
+
+interface InterfaceSummarizeByClass<T> {
+  [key: string]: {
+    class:T;
+    dist: ReadonlyArray<[number, number]>;
+  }
+}
+
 /**
  * The Naive is an intuitive method that uses probabilistic of each attribute
  * belonged to each class to make a prediction. It uses Gaussian function to estimate
@@ -19,44 +34,29 @@ const { isMatrix } = math.contrib;
  * nb.predict({ X: [[1, 20]] }); // returns [ 1 ]
  *
  */
-export class GaussianNB {
+export class GaussianNB<T extends string | number = number> {
   /**
    * Naive Bayes summary according to classes
    */
-  private summaries = null;
-
-  /**
-   * To clone input values
-   */
-  private clone = true;
+  private summaries: InterfaceSummarizeByClass<T> = null;
 
   /**
    * @param clone - To clone the input values during fit and predict
    */
-  constructor(
-    {
-      clone = true
-    }: {
-      clone: boolean;
-    } = {
-      clone: true
-    }
-  ) {
-    this.clone = clone;
-  }
+  constructor(private clone:boolean = true) {}
 
   /**
    * Fit date to build Gaussian Distribution summary
-   * @param {any} X - training values
-   * @param {any} y - target values
+   * @param {T} X - training values
+   * @param {T} y - target values
    */
   public fit(
     {
       X = null,
       y = null
     }: {
-      X: any[][];
-      y: any[];
+      X: TypeMatrix<number>;
+      y: ReadonlyArray<T>;
     } = {
       X: null,
       y: null
@@ -77,36 +77,36 @@ export class GaussianNB {
       clonedX = cloneDeep(X);
       clonedY = cloneDeep(y);
     }
-    this.summaries = this.summarizeByClass({ X: clonedX, y: clonedY });
+    this.summaries = this.summarizeByClass(clonedX, clonedY);
   }
 
   /**
    * Predict multiple rows
-   * @param {any[]} X - values to predict in Matrix format
+   * @param {T[]} X - values to predict in Matrix format
    * @returns {number[]}
    */
   public predict(
     {
       X = null
     }: {
-      X: any[][];
+      X: TypeMatrix<number>;
     } = {
       X: null
     }
-  ): number[] {
+  ): T[] {
     if (!isMatrix(X)) {
       throw new Error('X must be a matrix');
     }
-    let clonedX = X;
+    // let clonedX = X;
 
-    if (this.clone) {
-      clonedX = cloneDeep(X);
-    }
-    const result = [];
-    for (let i = 0; i < clonedX.length; i++) {
-      result.push(this.singlePredict({ X: clonedX[i] }));
-    }
-    return result;
+    // if (this.clone) {
+    //   clonedX = cloneDeep(X);
+    // }
+    // const result:T[] = [];
+    // for (let i = 0; i < clonedX.length; i++) {
+    //   result.push(this.singlePredict(clonedX[i]));
+    // }
+    return X.map(x => this.singlePredict(x));
   }
 
   /**
@@ -140,8 +140,9 @@ export class GaussianNB {
    * Make a prediction
    * @param X -
    */
-  private singlePredict({ X }): number {
-    const summaryKeys = Object.keys(this.summaries);
+  private singlePredict(X:ReadonlyArray<number>): T {
+    const summaryKeys:ReadonlyArray<string> = Object.keys(this.summaries);
+
     // Comparing input and summary shapes
     const summaryLength = this.summaries[summaryKeys[0]].dist.length;
     const inputLength = X.length;
@@ -150,36 +151,31 @@ export class GaussianNB {
     }
 
     // Getting probability of each class
-    const probabilities = {};
-    for (let i = 0; i < summaryKeys.length; i++) {
-      const key = summaryKeys[i];
+    // TODO Log Probabilities
+    const probabilities:StrNumDict<number> = {};
+    for (const key of summaryKeys) {
       probabilities[key] = 1;
-      const classSummary = this.summaries[key].dist;
+      const classSummary:ReadonlyArray<[number, number]> = this.summaries[key].dist;
       for (let j = 0; j < classSummary.length; j++) {
-        const meanval = classSummary[j][0];
-        const stdev = classSummary[j][1];
-        const x = X[j];
-        const probability = this.calculateProbability({ x, meanval, stdev });
+        const [meanval, stdev] = classSummary[j];
+        const probability:number = this.calculateProbability(X[j], meanval, stdev);
         if (!isNaN(probability)) {
           probabilities[key] *= probability;
         }
       }
     }
 
-    // Vote the best predction
-    let bestProb = 0;
-    let bestClass = null;
-    const probKeys = Object.keys(probabilities);
-    for (let i = 0; i < probKeys.length; i++) {
-      const key = probKeys[i];
-      const prob = probabilities[key];
-      if (prob > bestProb) {
-        bestProb = prob;
-        // Returns the real class value
-        bestClass = this.summaries[key].class;
-      }
-    }
-    return bestClass;
+
+    // // Vote the best predction
+    const [keyOfBestClass, probOfBestClass] = Object.entries(probabilities)
+        .reduce((maxEntry, [key, prob]) => maxEntry && maxEntry[1] > prob ? maxEntry:[key, prob]);
+
+    // Calculate Class Probabilities
+    // const totalProbs = Object.values(probabilities)
+    //     .reduce((sum, prob) => sum + prob, 0);
+    // const classProbability = probOfBestClass / totalProbs;
+
+    return this.summaries[keyOfBestClass].class;
   }
 
   /**
@@ -188,9 +184,9 @@ export class GaussianNB {
    * @param meanval
    * @param stdev
    */
-  private calculateProbability({ x, meanval, stdev }: { x: number; meanval: number; stdev: number }): number {
-    const stdevPow: any = pow(stdev, 2);
-    const meanValPow: any = -pow(x - meanval, 2);
+  private calculateProbability(x:number, meanval:number, stdev:number): number {
+    const stdevPow:any = pow(stdev, 2);
+    const meanValPow = -pow(x - meanval, 2);
     const exponent = exp(meanValPow / (2 * stdevPow));
     return (1 / (sqrt(pi.valueOf() * 2) * stdev)) * exponent;
   }
@@ -206,18 +202,16 @@ export class GaussianNB {
    * '1': [ [ 2, 1.4142135623730951 ], [ 21, 1.4142135623730951 ] ] }
    * @param dataset
    */
-  private summarizeByClass({ X, y }): {} {
-    const separated = this.separateByClass({ X, y });
-    const summarize = {};
-    const keys = Object.keys(separated);
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      // tslint:disable-next-line
-      const targetClass = y.find(z => z == key); // Finding the real target value from y array
+  private summarizeByClass(X:TypeMatrix<number>, y:ReadonlyArray<T>): InterfaceSummarizeByClass<T> {
+    const separated:StrNumDictArray = this.separateByClass(X, y);
+    const summarize: InterfaceSummarizeByClass<T> = {};
+    for (const key of Object.keys(separated)) {
+      // Finding the real target value from y array
+      const targetClass:T = y.find(z => z.toString() === key);
       // Mutating "separated" variable instead of immutable approach for performance
       separated[key].forEach(x => x.push(targetClass));
       const dataset = separated[key];
-      // storing object to each attribute to store real class value and dist sumamry
+      // storing object to each attribute to store real class value and dist summary
       summarize[key] = {
         class: targetClass,
         dist: this.summarize(dataset)
@@ -230,7 +224,7 @@ export class GaussianNB {
    * Summarise the dataset to calculate the ‘pdf’ (probability density function) later on
    * @param dataset
    */
-  private summarize(dataset): number[] {
+  private summarize(dataset:Array<Array<string|number>>): ReadonlyArray<[number, number]> {
     const sorted = [];
     // Manual ZIP; simulating Python's zip(*data)
     // TODO: Find a way to use a built in function
@@ -258,14 +252,20 @@ export class GaussianNB {
 
   /**
    * Separates X by classes specified by y argument
+   * Given
+   * const X = [[1,20], [2,21], [3,22], [4,22]];
+   * const y = [1, 0, 1, 0];
+   * Returns
+   * { '0': [ [2,21], [4,22] ],
+   * '1': [ [1,20], [3,22] ] }
    * @param X
    * @param y
    */
-  private separateByClass({ X, y }): {} {
-    const result = {};
+  private separateByClass(X:TypeMatrix<number>, y:ReadonlyArray<T>):StrNumDictArray {
+    const result:StrNumDictArray = {};
     for (let i = 0; i < X.length; i++) {
-      const row = X[i];
-      const target = y[i];
+      const row:ReadonlyArray<number> = X[i];
+      const target:string|number = y[i];
       if (result[target]) {
         // If value already exist
         result[target].push(row);
