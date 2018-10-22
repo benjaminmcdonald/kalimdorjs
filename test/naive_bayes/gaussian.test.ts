@@ -13,6 +13,12 @@ describe('naive_bayes:GaussianNB', () => {
     nb.fit({ X: X1, y: y1 });
     const result = nb.predict({ X: [[1, 20]] });
     expect(result).toEqual(expected);
+    const result2 = nb.predict({ X: [[2, 21]] });
+    expect(result2).toEqual([0]);
+    const result3 = nb.predict({ X: [[4, 22]] });
+    expect(result3).toEqual([0]);
+    const result4 = nb.predict({ X: [[3, 22]] });
+    expect(result4).toEqual([1]);
   });
   it('Should fit X1 and y1 and reload then predict the same', () => {
     const expected = [1];
