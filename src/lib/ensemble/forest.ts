@@ -1,4 +1,5 @@
 import { concat, countBy, find, head, isEqual, keys, map, maxBy, range, reduce, values } from 'lodash';
+import { IMlModel} from '../model-interfaces';
 import { DecisionTreeClassifier } from '../tree/tree';
 
 /**
@@ -107,7 +108,7 @@ export class BaseRandomForest {
  * // Results in a value such as [ '0', '2' ].
  * // Predictions will change as we have not set a seed value.
  */
-export class RandomForestClassifier extends BaseRandomForest {
+export class RandomForestClassifier extends BaseRandomForest implements IMlModel<any> {
   /**
    * Predict class for X.
    *

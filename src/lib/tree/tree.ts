@@ -3,6 +3,8 @@ import * as Random from 'random-js';
 import math from '../utils/MathExtra';
 const { isMatrix } = math.contrib;
 
+import { IMlModel} from '../model-interfaces';
+
 /**
  * Question used by decision tree algorithm to determine whether to split branch or not
  * @ignore
@@ -138,7 +140,8 @@ export interface Options {
   verbose?: boolean;
   randomise?: boolean;
 }
-export class DecisionTreeClassifier {
+
+export class DecisionTreeClassifier implements IMlModel<string> {
   private featureLabels = null;
   private tree = null;
   private verbose = true;

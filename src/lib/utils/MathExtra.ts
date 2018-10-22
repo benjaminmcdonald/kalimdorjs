@@ -43,7 +43,7 @@ const range = (start: number, stop: number) => {
  * @param {string} _type
  * @ignore
  */
-const isMatrixOf = (matrix, _type = 'number') => {
+const isMatrixOf = (matrix:ReadonlyArray<ReadonlyArray<number>>, _type = 'number') => {
   if (!isMatrix(matrix)) {
     throw Error(`Cannot perform isMatrixOf ${_type} unless the data is matrix`);
   }

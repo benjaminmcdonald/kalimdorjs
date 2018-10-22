@@ -1,4 +1,5 @@
 import { cloneDeep, fill } from 'lodash';
+import { IMlModel} from '../model-interfaces';
 import { MinMaxScaler } from '../preprocessing';
 import math from '../utils/MathExtra';
 
@@ -268,7 +269,7 @@ export class SGDClassifier extends BaseSGD {
  * reg.predict({ X: [[2., 2.]] }); // result: [ 1.281828588248001 ]
  *
  */
-export class SGDRegressor extends BaseSGD {
+export class SGDRegressor extends BaseSGD implements IMlModel<number> {
   /**
    * Predicted values
    * @param X - Matrix of data

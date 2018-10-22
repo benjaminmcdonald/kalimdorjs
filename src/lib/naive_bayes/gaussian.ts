@@ -1,10 +1,12 @@
-import { isNaN } from 'lodash';
-import { exp, mean, pi, pow, sqrt, std } from 'mathjs';
+import {chunk, zip} from 'lodash';
+import {IMlModel, Serialization, TypeMatrix} from '../model-interfaces';
 import math from '../utils/MathExtra';
+
+import * as tfc from '@tensorflow/tfjs-core';
+
 
 const { isMatrix } = math.contrib;
 
-type TypeMatrix<T> = ReadonlyArray<ReadonlyArray<T>>
 interface StrNumDict<T> {
   [key: string]: T;
   [key: number]: T;
@@ -13,11 +15,12 @@ type StrNumDictArray = StrNumDict<Array<ReadonlyArray<number>>>;
 
 
 interface InterfaceSummarizeByClass<T> {
-  [key: string]: {
-    class:T;
-    dist: ReadonlyArray<[number, number]>;
-  }
-} 
+  classCategories: ReadonlyArray<T> ,
+  mean: tfc.Tensor<tfc.Rank>,
+  variance: tfc.Tensor<tfc.Rank>,
+}
+
+const SQRT_2PI = Math.sqrt(Math.PI * 2);
 
 /**
  * The Naive is an intuitive method that uses probabilistic of each attribute
@@ -34,11 +37,12 @@ interface InterfaceSummarizeByClass<T> {
  * nb.predict({ X: [[1, 20]] }); // returns [ 1 ]
  *
  */
-export class GaussianNB<T extends string | number = number> {
+export class GaussianNB<T extends number | string = number>
+    extends Serialization<InterfaceSummarizeByClass<T>>
+    implements IMlModel<T> {
   /**
    * Naive Bayes summary according to classes
    */
-  constructor(private summaries: InterfaceSummarizeByClass<T> = null) {}
 
   /**
    * Fit date to build Gaussian Distribution summary
@@ -66,8 +70,11 @@ export class GaussianNB<T extends string | number = number> {
     if (X.length !== y.length) {
       throw new Error('X and y must be same in length');
     }
-    this.summaries = this.summarizeByClass(X, y);
-
+    try {
+      this._modelState = this.summarizeByClass(X, y);
+    } catch (e) {
+      throw e;
+    }
   }
 
   /**
@@ -84,164 +91,88 @@ export class GaussianNB<T extends string | number = number> {
       X: null
     }
   ): T[] {
-    if (!isMatrix(X)) {
-      throw new Error('X must be a matrix');
+    try {
+      return X.map((x):T => this.singlePredict(x));
+    } catch (e) {
+      if (!isMatrix(X)) {
+        throw new Error('X must be a matrix');
+      } else {
+        throw e;
+      }
     }
-
-    return X.map(x => this.singlePredict(x));
   }
 
-  /**
-   * Restores GaussianNB model from a checkpoint
-   * @param summaries - Gaussian Distribution summaries
-   */
-  public fromJSON(
-    {
-      summaries = null
-    }: {
-      summaries: {};
-    } = {
-      summaries: null
-    }
-  ): void {
-    this.summaries = summaries;
-  }
+  // public *predictIterator(X: IterableIterator<IterableIterator<number>>): IterableIterator<T> {
+  //   for (const x of X) {
+  //     yield this.singlePredict([...x]);
+  //   }
+  // }
 
-  /**
-   * Returns a model checkpoint
-   */
-  public toJSON(): {
-    summaries: {};
-  } {
-    return {
-      summaries: this.summaries
-    };
-  }
 
   /**
    * Make a prediction
-   * @param X -
+   * @param X - new data to test
    */
   private singlePredict(X:ReadonlyArray<number>): T {
-    const summaryKeys:ReadonlyArray<string> = Object.keys(this.summaries);
-
+    const matrixX = tfc.tensor1d(X as number[], 'float32');
+    const numFeatures = matrixX.shape[0];
 
     // Comparing input and summary shapes
-    const summaryLength = this.summaries[summaryKeys[0]].dist.length;
-    const inputLength = X.length;
-    if (inputLength > summaryLength) {
-      throw new Error(`Prediction input ${inputLength} length must be equal or less than summary length ${summaryLength}`);
+    const summaryLength = this._modelState.mean.shape[1];
+    if (numFeatures > summaryLength) {
+      throw new Error(`Prediction input ${matrixX.shape[0]} length must be equal or less than summary length ${summaryLength}`);
     }
 
-    // Getting probability of each class
-    // TODO Log Probabilities
-    const probabilities:StrNumDict<number> = {};
-    for (const key of summaryKeys) {
-      probabilities[key] = 1;
-      const classSummary:ReadonlyArray<[number, number]> = this.summaries[key].dist;
-      for (let j = 0; j < classSummary.length; j++) {
-        const [meanval, stdev] = classSummary[j];
-        const probability:number = this.calculateProbability(X[j], meanval, stdev);
-        if (!isNaN(probability)) {
-          probabilities[key] *= probability;
-        }
-      }
-    }
+    const {mean, variance} = this._modelState;
 
+    const meanValPow = matrixX.sub(mean)
+        .pow(tfc.scalar(2)).mul(tfc.scalar(-1));
 
-    // // Vote the best predction
-    const [keyOfBestClass] = Object.entries(probabilities)
-        .reduce((maxEntry, [key, prob]) => maxEntry && maxEntry[1] > prob ? maxEntry:[key, prob]);
+    const exponent = meanValPow.div(variance.mul(tfc.scalar(2))).exp()
+    const innerDiv = tfc.scalar(SQRT_2PI).mul(variance.sqrt());
+    const probabilityArray = tfc.scalar(1)
+      .div(innerDiv)
+      .mul(exponent);
 
-    // Calculate Class Probabilities
-    // const totalProbs = Object.values(probabilities)
-    //     .reduce((sum, prob) => sum + prob, 0);
-    // const classProbability = probOfBestClass / totalProbs;
+    const allProbabilities = chunk(probabilityArray.dataSync(), numFeatures)
+      .map(probabilitySet => probabilitySet.reduce((r, p) => r * p, 1));
 
-    return this.summaries[keyOfBestClass].class;
+    const selectionIndex = tfc.tensor1d(allProbabilities, 'float32').argMax().dataSync()[0];
+
+    return this._modelState.classCategories[selectionIndex];
   }
 
-  /**
-   * Calculate the main division
-   * @param x
-   * @param meanval
-   * @param stdev
-   */
-  private calculateProbability(x:number, meanval:number, stdev:number): number {
-    const stdevPow:any = pow(stdev, 2);
-    const meanValPow = -pow(x - meanval, 2);
-    const exponent = exp(meanValPow / (2 * stdevPow));
-    return (1 / (sqrt(pi.valueOf() * 2) * stdev)) * exponent;
-  }
 
   /**
    * Summarise the dataset per class using "probability density function"
-   * example:
-   * Given
-   * const X = [[1,20], [2,21], [3,22], [4,22]];
-   * const y = [1, 0, 1, 0];
-   * Returns
-   * { '0': [ [ 3, 1.4142135623730951 ], [ 21.5, 0.7071067811865476 ] ],
-   * '1': [ [ 2, 1.4142135623730951 ], [ 21, 1.4142135623730951 ] ] }
-   * @param dataset
    */
-  private summarizeByClass(X:TypeMatrix<number>, y:ReadonlyArray<T>): InterfaceSummarizeByClass<T> {
-    const separated:StrNumDictArray = this.separateByClass(X, y);
-    return Object.keys(separated).reduce((summarize:InterfaceSummarizeByClass<T>, key:string) => {
-      // Finding the real target value from y array
-      const targetClass:T = y.find(z => z.toString() === key);
-      
-      // storing object to each attribute to store real class value and dist summary
-      summarize[key] = {
-        class: targetClass,
-        dist: this.summarize(separated[key])
-      };
+  private summarizeByClass(X:TypeMatrix<number>, y:ReadonlyArray<T>):InterfaceSummarizeByClass<T> {
+    const classCategories:ReadonlyArray<T> = [...(new Set(y))];
 
-      return summarize;
-    }, {});
-  }
+    // Separates X by classes specified by y argument
+    const separatedByCategory:StrNumDictArray =
+        zip<ReadonlyArray<number>, T>(X, y).reduce((groups, [row, category]) => {
+          groups[category.toString()] = groups[category.toString()] || [];
+          groups[category.toString()].push(row);
 
-  /**
-   * Separates X by classes specified by y argument
-   * Given
-   * const X = [[1,20], [2,21], [3,22], [4,22]];
-   * const y = [1, 0, 1, 0];
-   * Returns
-   * { '0': [ [2,21], [4,22] ],
-   * '1': [ [1,20], [3,22] ] }
-   * @param X
-   * @param y
-   */
-  private separateByClass(X:TypeMatrix<number>, y:ReadonlyArray<T>):StrNumDictArray {
-    return X.reduce((groups, row, i) => {
-      const className:string|number = y[i];
-      groups[className] = groups[className] || [];
-      groups[className].push(row);
-      return groups;
-    }, {});
-  }
+          return groups;
+        }, {});;
 
-  /**
-   * Summarise the dataset to calculate the ‘pdf’ (probability density function) later on
-   * @param dataset
-   */
-  private summarize(dataset:ReadonlyArray<ReadonlyArray<number>>): ReadonlyArray<[number, number]> {
-    const sorted:number[][] = [];
-    // Manual ZIP; simulating Python's zip(*data)
-    // TODO: Find a way to use a built in function
-    for (const row of dataset) {
-      for (let zCol = 0; zCol < row.length; zCol++) {
-        // Pushes a new array placeholder if it's not populated yet at zRow index
-        sorted[zCol] = sorted[zCol] || [];
-        sorted[zCol].push(row[zCol]);
-      }
-    }
+    const modelData = classCategories.map((category:T):Array<ReadonlyArray<number>> => {
+      return separatedByCategory[category.toString()];
+    });
+    const modelDataTensor = tfc.tensor3d(modelData as number[][][], null, 'float32');
+    const moments = tfc.moments(modelDataTensor, [1]);
+    // TODO check for NaN or 0 variance
+    // setTimeout(() => {
+    //   if ([...variance.dataSync()].some(i => i === 0)) {
+    //     console.error('No variance on one of the features. Errors may result.');
+    //   }
+    // }, 100);
 
-    const summaries: Array<[number, number]> = [];
-    for (const attributes of sorted) {
-      summaries.push([mean(attributes), std(attributes)]);
-    }
-    
-    return summaries;
+    return {
+      classCategories,
+      ...moments,
+    };
   }
 }

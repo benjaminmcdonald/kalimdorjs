@@ -1,3 +1,12 @@
+
+//ERROR: (no-var-requires) src/lib/index.ts[2, 3]: require statement not part of an import statement
+// try {
+//   require('@tensorflow/tfjs-node-gpu');
+// } catch (e) {
+//   console.error(e);
+//   require('@tensorflow/tfjs-node');
+// }
+
 import * as cluster from './cluster';
 import * as datasets from './datasets';
 import * as decomposition from './decomposition';

@@ -3,6 +3,7 @@
  * - https://machinelearningmastery.com/implement-simple-linear-regression-scratch-python/
  */
 import { size } from 'lodash';
+import { IMlModel} from '../model-interfaces';
 import math from '../utils/MathExtra';
 
 /**
@@ -17,7 +18,7 @@ import math from '../utils/MathExtra';
  * console.log(lr.predict([1, 2]));
  * // [ 1.1999999999999995, 1.9999999999999996 ]
  */
-export class LinearRegression {
+export class LinearRegression implements IMlModel<number> {
   private b0: number;
   private b1: number;
 
@@ -26,7 +27,7 @@ export class LinearRegression {
    * @param {any} X - training values
    * @param {any} y - target values
    */
-  public fit({ X = [], y = [] }: { X: number[]; y: number[] }): void {
+  public fit({X, y}: { X: number[]; y: number[] }): void {
     if (!Array.isArray(X) || !Array.isArray(y)) {
       throw new Error('X and y must be arrays');
     }
