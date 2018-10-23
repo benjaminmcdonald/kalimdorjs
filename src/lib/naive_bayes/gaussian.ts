@@ -1,23 +1,25 @@
 import {chunk, zip} from 'lodash';
-import {IMlModel, Serialization, TypeMatrix} from '../model-interfaces';
+import {IMlModel, TypeMatrix} from '../model-interfaces';
 import math from '../utils/MathExtra';
 
 import * as tfc from '@tensorflow/tfjs-core';
 
-
 const { isMatrix } = math.contrib;
 
-interface StrNumDict<T> {
-  [key: string]: T;
-  [key: number]: T;
+interface StrNumDict {
+  [key: string]: ReadonlyArray<ReadonlyArray<number>>;
 }
-type StrNumDictArray = StrNumDict<Array<ReadonlyArray<number>>>;
 
-
-interface InterfaceSummarizeByClass<T> {
+interface InterfaceFitModel<T> {
   classCategories: ReadonlyArray<T> ,
   mean: tfc.Tensor<tfc.Rank>,
   variance: tfc.Tensor<tfc.Rank>,
+}
+
+interface InterfaceFitModelAsArray<T> {
+  classCategories: ReadonlyArray<T> ,
+  mean: ReadonlyArray<number>,
+  variance: ReadonlyArray<number>,
 }
 
 const SQRT_2PI = Math.sqrt(Math.PI * 2);
@@ -38,8 +40,9 @@ const SQRT_2PI = Math.sqrt(Math.PI * 2);
  *
  */
 export class GaussianNB<T extends number | string = number>
-    extends Serialization<InterfaceSummarizeByClass<T>>
     implements IMlModel<T> {
+  private _modelState:InterfaceFitModel<T>;
+
   /**
    * Naive Bayes summary according to classes
    */
@@ -71,7 +74,7 @@ export class GaussianNB<T extends number | string = number>
       throw new Error('X and y must be same in length');
     }
     try {
-      this._modelState = this.summarizeByClass(X, y);
+      this._modelState = this.fitModel(X, y);
     } catch (e) {
       throw e;
     }
@@ -102,40 +105,65 @@ export class GaussianNB<T extends number | string = number>
     }
   }
 
-  // public *predictIterator(X: IterableIterator<IterableIterator<number>>): IterableIterator<T> {
-  //   for (const x of X) {
-  //     yield this.singlePredict([...x]);
-  //   }
-  // }
+  public *predictIterator(X: IterableIterator<IterableIterator<number>>): IterableIterator<T> {
+    for (const x of X) {
+      yield this.singlePredict([...x]);
+    }
+  }
 
+  public fromJSON(modelState:InterfaceFitModelAsArray<T>): void {
+    console.dir(modelState);
+    this._modelState = {
+      classCategories: modelState.classCategories,
+      mean: tfc.tensor1d(modelState.mean as number[]),
+      variance: tfc.tensor1d(modelState.variance as number[]),
+    };
+    this._modelState.mean.print();
+    this._modelState.variance.print();
+  }
+
+  /**
+   * Returns a model checkpoint
+   */
+  public toJSON():InterfaceFitModelAsArray<T> {
+    this._modelState.mean.print();
+    this._modelState.variance.print();
+    return {
+      classCategories: this._modelState.classCategories,
+      mean: [...this._modelState.mean.clone().dataSync()],
+      variance: [...this._modelState.variance.clone().dataSync()],
+    };
+  }
 
   /**
    * Make a prediction
    * @param X - new data to test
    */
   private singlePredict(X:ReadonlyArray<number>): T {
-    const matrixX = tfc.tensor1d(X as number[], 'float32');
+    const matrixX:tfc.Tensor<tfc.Rank> = tfc.tensor1d(X as number[], 'float32');
     const numFeatures = matrixX.shape[0];
 
     // Comparing input and summary shapes
     const summaryLength = this._modelState.mean.shape[1];
-    if (numFeatures > summaryLength) {
+    if (numFeatures !== summaryLength) {
       throw new Error(`Prediction input ${matrixX.shape[0]} length must be equal or less than summary length ${summaryLength}`);
     }
 
-    const {mean, variance} = this._modelState;
+    const mean = this._modelState.mean.clone();
+    const variance = this._modelState.variance.clone();
 
-    const meanValPow = matrixX.sub(mean)
+    const meanValPow:tfc.Tensor<tfc.Rank> = matrixX.sub(mean)
         .pow(tfc.scalar(2)).mul(tfc.scalar(-1));
 
-    const exponent = meanValPow.div(variance.mul(tfc.scalar(2))).exp()
-    const innerDiv = tfc.scalar(SQRT_2PI).mul(variance.sqrt());
-    const probabilityArray = tfc.scalar(1)
+    const exponent:tfc.Tensor<tfc.Rank> = meanValPow.div(variance.mul(tfc.scalar(2))).exp()
+    const innerDiv:tfc.Tensor<tfc.Rank> = tfc.scalar(SQRT_2PI).mul(variance.sqrt());
+    const probabilityArray:tfc.Tensor<tfc.Rank> = tfc.scalar(1)
       .div(innerDiv)
       .mul(exponent);
 
     const allProbabilities = chunk(probabilityArray.dataSync(), numFeatures)
       .map(probabilitySet => probabilitySet.reduce((r, p) => r * p, 1));
+    probabilityArray.dispose();
 
     const selectionIndex = tfc.tensor1d(allProbabilities, 'float32').argMax().dataSync()[0];
 
@@ -146,11 +174,11 @@ export class GaussianNB<T extends number | string = number>
   /**
    * Summarise the dataset per class using "probability density function"
    */
-  private summarizeByClass(X:TypeMatrix<number>, y:ReadonlyArray<T>):InterfaceSummarizeByClass<T> {
+  private fitModel(X:TypeMatrix<number>, y:ReadonlyArray<T>):InterfaceFitModel<T> {
     const classCategories:ReadonlyArray<T> = [...(new Set(y))];
 
     // Separates X by classes specified by y argument
-    const separatedByCategory:StrNumDictArray =
+    const separatedByCategory:StrNumDict =
         zip<ReadonlyArray<number>, T>(X, y).reduce((groups, [row, category]) => {
           groups[category.toString()] = groups[category.toString()] || [];
           groups[category.toString()].push(row);
@@ -158,10 +186,10 @@ export class GaussianNB<T extends number | string = number>
           return groups;
         }, {});;
 
-    const modelData = classCategories.map((category:T):Array<ReadonlyArray<number>> => {
+    const modelData = classCategories.map((category:T):ReadonlyArray<ReadonlyArray<number>> => {
       return separatedByCategory[category.toString()];
     });
-    const modelDataTensor = tfc.tensor3d(modelData as number[][][], null, 'float32');
+    const modelDataTensor:tfc.Tensor<tfc.Rank.R3> = tfc.tensor3d(modelData as number[][][], null, 'float32');
     const moments = tfc.moments(modelDataTensor, [1]);
     // TODO check for NaN or 0 variance
     // setTimeout(() => {

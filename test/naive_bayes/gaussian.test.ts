@@ -57,7 +57,7 @@ describe('naive_bayes:GaussianNB', () => {
     expect(result).toEqual(expected);
 
     // Restored model
-    const checkpoint = nb.toJSON();
+    const checkpoint = JSON.parse(JSON.stringify(nb.toJSON()));
     const nb2 = new GaussianNB();
     nb2.fromJSON(checkpoint);
     const result2 = nb2.predict({ X: [[1, 20]] });

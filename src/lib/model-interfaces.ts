@@ -42,22 +42,3 @@ export abstract class IMlModel<T> {
    */
   public abstract toJSON(): any;
 }
-
-export class Serialization<T> {
-  protected _modelState:T;
-
-  /**
-   * Restores GaussianNB model from a checkpoint
-   * @param modelState - Gaussian Distribution modelState
-   */
-  public fromJSON(modelState): void {
-    this._modelState = modelState;
-  }
-
-  /**
-   * Returns a model checkpoint
-   */
-  public toJSON():any {
-    return this._modelState;
-  }
-}
